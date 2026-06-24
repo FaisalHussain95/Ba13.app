@@ -1,0 +1,13 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code agent memory (auto-generated session state)
+.claude/agent-memory/
+*/.claude/agent-memory/
