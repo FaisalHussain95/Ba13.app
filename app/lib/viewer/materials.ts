@@ -35,8 +35,8 @@ export function getMaterials(THREE: typeof THREE_NS): ViewerMaterials {
     color: 0xf5f0e8,
     metalness: 0.0,
     roughness: 0.9,
-    transparent: true,
-    opacity: 0.98,
+    transparent: false,
+    opacity: 1,
     side: THREE.DoubleSide,
   })
 

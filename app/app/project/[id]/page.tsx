@@ -10,7 +10,8 @@ import WallConfigSheet from '@/components/WallConfigSheet'
 import DoorConfigSheet from '@/components/DoorConfigSheet'
 import DoorEditSheet from '@/components/DoorEditSheet'
 import SegmentLengthSheet from '@/components/SegmentLengthSheet'
-import type { PendingSegmentEdit, PendingDoorEdit } from '@/hooks/usePlanCanvas'
+import AngleConstraintSheet from '@/components/AngleConstraintSheet'
+import type { PendingSegmentEdit, PendingDoorEdit, PendingAngleEdit } from '@/hooks/usePlanCanvas'
 import { useSettings } from '@/hooks/useSettings'
 import Ba13Viewer from '@/components/visualiser/Ba13Viewer'
 import PlafondConfigSheet from '@/components/PlafondConfigSheet'
@@ -45,6 +46,11 @@ export default function PlanEditorPage({ params }: PlanEditorPageProps) {
   const [pendingDoorEditState, setPendingDoorEditState] = useState<PendingDoorEdit | null>(null)
   const doorEditRef = useRef<{
     apply: (doorId: string, wallId: string, pos: number) => void
+    clear: () => void
+  } | null>(null)
+  const [pendingAngleEditState, setPendingAngleEditState] = useState<PendingAngleEdit | null>(null)
+  const angleEditRef = useRef<{
+    apply: (wallId: string, pointIdx: number, angleDeg: number) => void
     clear: () => void
   } | null>(null)
   const [editingName, setEditingName] = useState(false)
@@ -300,6 +306,8 @@ export default function PlanEditorPage({ params }: PlanEditorPageProps) {
             onPendingSegmentEdit={setPendingSegEdit}
             onDoorEditReady={(h) => { doorEditRef.current = h }}
             onPendingDoorEdit={setPendingDoorEditState}
+            onAngleEditReady={(h) => { angleEditRef.current = h }}
+            onPendingAngleEdit={setPendingAngleEditState}
           />
         </div>
 
@@ -424,6 +432,27 @@ export default function PlanEditorPage({ params }: PlanEditorPageProps) {
         onClose={() => {
           segEditRef.current?.clear()
           setPendingSegEdit(null)
+        }}
+      />
+
+      {/* Angle constraint sheet (tap vertex in select mode) */}
+      <AngleConstraintSheet
+        isOpen={pendingAngleEditState !== null}
+        label={pendingAngleEditState?.label ?? ''}
+        currentAngle={pendingAngleEditState?.currentAngleDeg ?? 90}
+        onSave={(angleDeg) => {
+          if (pendingAngleEditState) {
+            angleEditRef.current?.apply(
+              pendingAngleEditState.wallId,
+              pendingAngleEditState.pointIdx,
+              angleDeg
+            )
+          }
+          setPendingAngleEditState(null)
+        }}
+        onClose={() => {
+          angleEditRef.current?.clear()
+          setPendingAngleEditState(null)
         }}
       />
 

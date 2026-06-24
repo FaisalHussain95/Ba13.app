@@ -3,7 +3,7 @@
 import { useRef, useEffect } from 'react'
 import type { Wall, Door } from '@/types'
 import { usePlanCanvas } from '@/hooks/usePlanCanvas'
-import type { PendingSegmentEdit, PendingDoorEdit } from '@/hooks/usePlanCanvas'
+import type { PendingSegmentEdit, PendingDoorEdit, PendingAngleEdit } from '@/hooks/usePlanCanvas'
 
 interface SegmentEditHandler {
   apply: (wallId: string, segIdx: number, len: number, wallProps?: { cladding: 'double' | 'single'; hasInsulation: boolean }) => void
@@ -12,6 +12,11 @@ interface SegmentEditHandler {
 
 interface DoorEditHandler {
   apply: (doorId: string, wallId: string, pos: number) => void
+  clear: () => void
+}
+
+interface AngleEditHandler {
+  apply: (wallId: string, pointIdx: number, angleDeg: number) => void
   clear: () => void
 }
 
@@ -27,6 +32,8 @@ interface PlanCanvasProps {
   onPendingSegmentEdit?: (edit: PendingSegmentEdit | null) => void
   onDoorEditReady?: (handler: DoorEditHandler) => void
   onPendingDoorEdit?: (edit: PendingDoorEdit | null) => void
+  onAngleEditReady?: (handler: AngleEditHandler) => void
+  onPendingAngleEdit?: (edit: PendingAngleEdit | null) => void
 }
 
 export default function PlanCanvas({
@@ -41,6 +48,8 @@ export default function PlanCanvas({
   onPendingSegmentEdit,
   onDoorEditReady,
   onPendingDoorEdit,
+  onAngleEditReady,
+  onPendingAngleEdit,
 }: PlanCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -60,6 +69,9 @@ export default function PlanCanvas({
     applyDoorPosition,
     undo,
     redraw,
+    pendingAngleEdit,
+    clearAngleEdit,
+    applyAngle,
     handleCanvasPointerDown,
     handleCanvasPointerMove,
     handleCanvasPointerUp,
@@ -93,6 +105,16 @@ export default function PlanCanvas({
   useEffect(() => {
     onPendingDoorEdit?.(pendingDoorEdit)
   }, [pendingDoorEdit, onPendingDoorEdit])
+
+  // Expose angle edit handler to parent
+  useEffect(() => {
+    onAngleEditReady?.({ apply: applyAngle, clear: clearAngleEdit })
+  }, [applyAngle, clearAngleEdit, onAngleEditReady])
+
+  // Propagate pending angle edit changes upward
+  useEffect(() => {
+    onPendingAngleEdit?.(pendingAngleEdit)
+  }, [pendingAngleEdit, onPendingAngleEdit])
 
   // Sync external mode into hook
   useEffect(() => {

@@ -185,6 +185,76 @@ export function isPolygonClosed(points: Point[]): boolean {
   return points.length >= 3
 }
 
+/**
+ * Returns the interior angle in degrees at vertex `idx` of a closed polygon.
+ * Expects `points[0] ≈ points[n-1]` (closing duplicate). Returns null when
+ * the vertex or its neighbours have zero-length edges.
+ */
+export function angleAtVertex(points: Point[], idx: number): number | null {
+  const n = points.length
+  if (n < 3) return null
+  const m = n - 1  // distinct vertex count
+  if (idx < 0 || idx >= m) return null
+
+  const prev = points[(idx - 1 + m) % m]
+  const curr = points[idx]
+  const next = points[(idx + 1) % m]
+
+  const v1x = prev.x - curr.x, v1y = prev.y - curr.y  // incoming reversed
+  const v2x = next.x - curr.x, v2y = next.y - curr.y  // outgoing
+
+  const len1 = Math.hypot(v1x, v1y)
+  const len2 = Math.hypot(v2x, v2y)
+  if (len1 < 1e-9 || len2 < 1e-9) return null
+
+  const cosA = (v1x * v2x + v1y * v2y) / (len1 * len2)
+  return Math.acos(Math.max(-1, Math.min(1, cosA))) * 180 / Math.PI
+}
+
+/**
+ * Rotates the outgoing segment at vertex `idx` so the interior angle equals
+ * `targetDeg`, preserving the CW/CCW turn direction.
+ *
+ * Only the immediate next vertex moves; the segment after it absorbs the change
+ * in length (same propagation contract as setSegmentLength).
+ */
+export function setVertexAngle(points: Point[], idx: number, targetDeg: number): Point[] {
+  const n = points.length
+  if (n < 3) return points
+  const m = n - 1
+  if (idx < 0 || idx >= m) return points
+
+  const prev = points[(idx - 1 + m) % m]
+  const curr = points[idx]
+  const nextIdx = (idx + 1) % m
+  const next = points[nextIdx]
+
+  const v1x = prev.x - curr.x, v1y = prev.y - curr.y
+  const v2x = next.x - curr.x, v2y = next.y - curr.y
+
+  const len1 = Math.hypot(v1x, v1y)
+  const len2 = Math.hypot(v2x, v2y)
+  if (len1 < 1e-9 || len2 < 1e-9) return points
+
+  // Signed angle from v1 to v2 (positive = CCW in maths coords)
+  const cross = v1x * v2y - v1y * v2x
+  const dotP  = v1x * v2x + v1y * v2y
+  const signedAngle = Math.atan2(cross, dotP)
+
+  const targetRad    = targetDeg * Math.PI / 180
+  const newSigned    = (Math.sign(signedAngle) || 1) * targetRad
+  const rotDelta     = newSigned - signedAngle
+
+  const cosR = Math.cos(rotDelta), sinR = Math.sin(rotDelta)
+  const newV2x = v2x * cosR - v2y * sinR
+  const newV2y = v2x * sinR + v2y * cosR
+
+  const result = [...points]
+  result[nextIdx] = { x: curr.x + newV2x, y: curr.y + newV2y }
+  result[n - 1]   = { ...result[0] }  // keep closing duplicate in sync
+  return result
+}
+
 export function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x
   const dy = b.y - a.y

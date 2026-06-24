@@ -21,6 +21,7 @@ export interface Wall {
   hasCeiling: boolean       // default true; unused in V1 calculation, persisted for V2
   doors: Door[]
   lockedSegments: number[]  // segment indices whose length is user-set and must not change
+  lockedAngles: number[]    // vertex indices whose angle is user-set
 }
 
 /**

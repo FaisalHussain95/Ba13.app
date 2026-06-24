@@ -8,6 +8,8 @@ import {
   pointToSegmentDistance,
   perimeterLength,
   setSegmentLength,
+  setVertexAngle,
+  angleAtVertex,
   segmentsOf,
   locateOnWall,
   isPolygonClosed,
@@ -97,7 +99,8 @@ function drawWall(
   mode: Mode,
   doorOuterWidthFn: (door: Door) => number,
   doorNumberFn: (door: Door) => number,
-  lockedSegments: number[]
+  lockedSegments: number[],
+  lockedAngles: number[]
 ) {
   if (wall.points.length < 2) return
 
@@ -126,12 +129,16 @@ function drawWall(
   ctx.lineWidth = isSelected ? 4 : 2
   ctx.stroke()
 
-  // Vertex dots
-  for (const pt of pxPoints) {
-    ctx.beginPath()
-    ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2)
-    ctx.fillStyle = isSelected ? '#1d4ed8' : '#555555'
-    ctx.fill()
+  // Vertex dots — blue when selected or angle-locked
+  {
+    const m = pxPoints.length > 2 ? pxPoints.length - 1 : pxPoints.length
+    for (let vi = 0; vi < m; vi++) {
+      const isAngleLocked = lockedAngles.includes(vi)
+      ctx.beginPath()
+      ctx.arc(pxPoints[vi].x, pxPoints[vi].y, 4, 0, Math.PI * 2)
+      ctx.fillStyle = (isSelected || isAngleLocked) ? '#1d4ed8' : '#555555'
+      ctx.fill()
+    }
   }
 
   // Segment length labels
@@ -185,12 +192,68 @@ function drawWall(
     drawLabel(pxPoints[i], pxPoints[i + 1], lenM, i)
   }
 
-  // If closed polygon, also draw last segment label
+  // The closing segment (last distinct vertex → first vertex) is already drawn by the
+  // loop above because the polygon is stored with an explicit closing duplicate at
+  // points[n-1] === points[0]. Only add the label when there is NO duplicate (open
+  // polyline that logically wraps) — in practice this path is never reached for saved walls.
   if (wall.points.length > 2) {
-    const a = pxPoints[pxPoints.length - 1]
-    const b = pxPoints[0]
-    const lenM = segmentLengthPx(wall.points[wall.points.length - 1], wall.points[0])
-    drawLabel(a, b, lenM, wall.points.length - 1)
+    const lastPt  = wall.points[wall.points.length - 1]
+    const firstPt = wall.points[0]
+    if (dist(lastPt, firstPt) > 0.001) {
+      const a = pxPoints[pxPoints.length - 1]
+      const b = pxPoints[0]
+      const lenM = segmentLengthPx(lastPt, firstPt)
+      drawLabel(a, b, lenM, wall.points.length - 1)
+    }
+  }
+
+  // --- Angle labels at vertices (select mode, closed polygon) ---
+  if (mode === 'select' && isPolygonClosed(wall.points)) {
+    const m = pxPoints.length - 1  // distinct vertex count
+    ctx.save()
+    ctx.font = '10px system-ui'
+    for (let i = 0; i < m; i++) {
+      const angleDeg = angleAtVertex(wall.points, i)
+      if (angleDeg === null) continue
+
+      const pt  = pxPoints[i]
+      const prv = pxPoints[(i - 1 + m) % m]
+      const nxt = pxPoints[(i + 1) % m]
+
+      // Bisector direction (inward from vertex)
+      const bx = (prv.x - pt.x) + (nxt.x - pt.x)
+      const by = (prv.y - pt.y) + (nxt.y - pt.y)
+      const bl = Math.hypot(bx, by)
+      const ox = bl > 1 ? (bx / bl) * 20 : 0
+      const oy = bl > 1 ? (by / bl) * 20 : -20
+
+      const isLocked = lockedAngles.includes(i)
+      const label = Math.round(angleDeg) + '°'
+      const lx = pt.x + ox
+      const ly = pt.y + oy
+      const tw = ctx.measureText(label).width
+
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      if (isLocked) {
+        ctx.fillStyle = '#dbeafe'
+        ctx.strokeStyle = '#1d4ed8'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.roundRect?.(lx - tw / 2 - 3, ly - 7, tw + 6, 14, 3)
+        ctx.fill()
+        ctx.stroke()
+        ctx.fillStyle = '#1d4ed8'
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.88)'
+        ctx.fillRect(lx - tw / 2 - 2, ly - 7, tw + 4, 14)
+        ctx.fillStyle = '#6b7280'
+      }
+
+      ctx.fillText(label, lx, ly)
+    }
+    ctx.restore()
   }
 
   // --- Door markers ---
@@ -363,6 +426,15 @@ export interface PendingDoorEdit {
   wall: Wall
 }
 
+export interface PendingAngleEdit {
+  wallId: string
+  pointIdx: number
+  currentAngleDeg: number
+  isLocked: boolean
+  label: string
+  wall: Wall
+}
+
 export interface UsePlanCanvasReturn {
   mode: Mode
   setMode: (m: Mode) => void
@@ -379,6 +451,9 @@ export interface UsePlanCanvasReturn {
   pendingDoorEdit: PendingDoorEdit | null
   setPendingDoorEdit: (edit: PendingDoorEdit | null) => void
   applyDoorPosition: (doorId: string, wallId: string, newPosition: number) => void
+  pendingAngleEdit: PendingAngleEdit | null
+  clearAngleEdit: () => void
+  applyAngle: (wallId: string, pointIdx: number, targetDeg: number) => void
   viewport: Viewport
   resetViewport: () => void
   undo: () => void
@@ -402,6 +477,7 @@ export function usePlanCanvas(
   const [pendingDoorPosition, setPendingDoorPosition] = useState(0)
   const [pendingSegmentEdit, setPendingSegmentEdit] = useState<PendingSegmentEdit | null>(null)
   const [pendingDoorEdit, setPendingDoorEdit] = useState<PendingDoorEdit | null>(null)
+  const [pendingAngleEdit, setPendingAngleEdit] = useState<PendingAngleEdit | null>(null)
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT)
   const { settings } = useSettings()
 
@@ -460,7 +536,7 @@ export function usePlanCanvas(
 
     // Draw completed walls — read mode from ref to avoid stale closure
     for (const wall of walls) {
-      drawWall(ctx, wall, selectedWall?.id === wall.id, vp, mode, doorOuterWidthM, doorNumberFn, wall.lockedSegments ?? [])
+      drawWall(ctx, wall, selectedWall?.id === wall.id, vp, mode, doorOuterWidthM, doorNumberFn, wall.lockedSegments ?? [], wall.lockedAngles ?? [])
     }
 
     // Draw in-progress draft
@@ -592,6 +668,7 @@ export function usePlanCanvas(
               hasCeiling: true,
               doors: [],
               lockedSegments: [],
+              lockedAngles: [],
             }
             setWalls([...walls, newWall])
             draftPoints.current = []
@@ -676,6 +753,30 @@ export function usePlanCanvas(
             if (dist(px, centerPx) < Math.max(24, wPx / 2)) {
               setPendingDoorEdit({ door, wall })
               return
+            }
+          }
+        }
+
+        // Check if tap is on a vertex → angle constraint editor
+        for (const wall of walls) {
+          if (!isPolygonClosed(wall.points)) continue
+          const pxPts = wall.points.map((p) => metersToPixels(p, vp))
+          const m = pxPts.length - 1
+          for (let i = 0; i < m; i++) {
+            if (dist(px, pxPts[i]) < 16) {
+              const angleDeg = angleAtVertex(wall.points, i)
+              if (angleDeg !== null) {
+                const isLocked = (wall.lockedAngles ?? []).includes(i)
+                setPendingAngleEdit({
+                  wallId: wall.id,
+                  pointIdx: i,
+                  currentAngleDeg: angleDeg,
+                  isLocked,
+                  label: isLocked ? `Angle verrouillé · coin ${i + 1}` : `Angle · coin ${i + 1}`,
+                  wall,
+                })
+                return
+              }
             }
           }
         }
@@ -789,6 +890,27 @@ export function usePlanCanvas(
     [walls, setWalls, redraw]
   )
 
+  const clearAngleEdit = useCallback(() => {
+    setPendingAngleEdit(null)
+  }, [])
+
+  const applyAngle = useCallback(
+    (wallId: string, pointIdx: number, targetDeg: number) => {
+      const wall = walls.find((w) => w.id === wallId)
+      if (!wall) return
+      const newPoints = setVertexAngle(wall.points, pointIdx, targetDeg)
+      const locked = wall.lockedAngles ?? []
+      const newLockedAngles = locked.includes(pointIdx) ? locked : [...locked, pointIdx]
+      const newWalls = walls.map((w) =>
+        w.id === wallId ? { ...w, points: newPoints, lockedAngles: newLockedAngles } : w
+      )
+      setWalls(newWalls)
+      setPendingAngleEdit(null)
+      redraw()
+    },
+    [walls, setWalls, redraw]
+  )
+
   const resetViewport = useCallback(() => {
     viewportRef.current = DEFAULT_VIEWPORT
     setViewport(DEFAULT_VIEWPORT)
@@ -833,6 +955,9 @@ export function usePlanCanvas(
     pendingDoorEdit,
     setPendingDoorEdit,
     applyDoorPosition,
+    pendingAngleEdit,
+    clearAngleEdit,
+    applyAngle,
     viewport,
     resetViewport,
     undo,

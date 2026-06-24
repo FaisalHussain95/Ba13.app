@@ -41,6 +41,7 @@ function normalizeProject(raw: unknown): Project {
         kind: 'wall' as const,
         hasCeiling: (wall.hasCeiling as boolean | undefined) ?? true,
         lockedSegments: (wall.lockedSegments as number[] | undefined) ?? [],
+        lockedAngles: (wall.lockedAngles as number[] | undefined) ?? [],
         doors: migratedDoors,
       }
     }),
